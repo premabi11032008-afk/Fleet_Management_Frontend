@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
-import { getFleetStats, getActiveTrips } from '../api/n8nEndpoints';
+import { getFleetStats, getActiveTrips } from '../api/apiEndpoints';
 
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';

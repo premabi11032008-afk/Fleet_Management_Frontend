@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getDrivers, removeDriver } from '../api/n8nEndpoints';
+import { getDrivers, removeDriver } from '../api/apiEndpoints';
 
 export default function DriverManagement() {
   const [drivers, setDrivers] = useState([]);

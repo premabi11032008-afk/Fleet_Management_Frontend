@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addVehicle } from '../api/n8nEndpoints';
+import { addVehicle } from '../api/apiEndpoints';
 
 export default function AddVehicle() {
   const [formData, setFormData] = useState({ make: '', model: '', year: '', vin: '', plate: '' });

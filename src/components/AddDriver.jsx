@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addDriver } from '../api/n8nEndpoints';
+import { addDriver } from '../api/apiEndpoints';
 
 export default function AddDriver() {
   const [formData, setFormData] = useState({ name: '', licenseNumber: '', phone: '', address: '' });
@@ -16,7 +16,7 @@ export default function AddDriver() {
     
     setNewCredentials({
       username: addedDriver.username,
-      password: addedDriver.generatedPassword,
+      password: addedDriver.password || addedDriver.generatedPassword,
       name: addedDriver.name
     });
     setLoading(false);

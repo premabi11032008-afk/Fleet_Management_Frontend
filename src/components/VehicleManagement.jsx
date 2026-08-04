@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getVehicles, removeVehicle } from '../api/n8nEndpoints';
+import { getVehicles, removeVehicle } from '../api/apiEndpoints';
 
 export default function VehicleManagement() {
   const [vehicles, setVehicles] = useState([]);
