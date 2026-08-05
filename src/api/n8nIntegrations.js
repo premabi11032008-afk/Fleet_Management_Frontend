@@ -1,10 +1,5 @@
-/**
- * Intelligent Fleet Management System - API Endpoints
- */
-
 const N8N_BASE_URL = import.meta.env.VITE_N8N_BASE_URL;
 
-// --- Caches for GET requests to handle StrictMode double-firing ---
 const cache = {
   stats: null,
   activeTrips: null,
@@ -12,7 +7,6 @@ const cache = {
   vehicles: null
 };
 
-// Helper function to extract data safely from n8n wrapper
 const extractData = (rawData) => {
   if (Array.isArray(rawData)) {
     if (rawData.length > 0 && Array.isArray(rawData[0].body)) return rawData[0].body;
@@ -34,6 +28,11 @@ const extractData = (rawData) => {
 
 // Generic GET function with caching
 const fetchFromN8n = async (action, defaultData, cacheKey) => {
+  if (cache[cacheKey] !== null) {
+    console.log(`[n8n] Returning cached data for ${action}`);
+    return cache[cacheKey];
+  }
+
   try {
     const response = await fetch(N8N_BASE_URL, {
       method: 'POST',
@@ -93,7 +92,6 @@ const postToN8n = async (action, payload) => {
 };
 
 // --- Auth ---
-let cachedCredentials = null;
 
 export const authenticateUser = async (role, username, password) => {
   if (role === 'manager') {
@@ -104,18 +102,16 @@ export const authenticateUser = async (role, username, password) => {
   }
 
   if (role === 'driver') {
-    if (!cachedCredentials) {
-      cachedCredentials = await postToN8n('getCredentials', {});
+    let credentialsData = await postToN8n('getCredentials', {});
+
+    if (credentialsData && !Array.isArray(credentialsData) && typeof credentialsData === 'object') {
+      credentialsData = [credentialsData];
     }
 
-    if (cachedCredentials && !Array.isArray(cachedCredentials) && typeof cachedCredentials === 'object') {
-      cachedCredentials = [cachedCredentials];
-    }
-
-    if (Array.isArray(cachedCredentials)) {
-      let credentialsToSearch = cachedCredentials;
-      if (cachedCredentials.length > 0 && cachedCredentials[0]._responseData) {
-        credentialsToSearch = cachedCredentials[0].items ? cachedCredentials[0].items.map(i => i.json) : [cachedCredentials[0]._responseData];
+    if (Array.isArray(credentialsData)) {
+      let credentialsToSearch = credentialsData;
+      if (credentialsData.length > 0 && credentialsData[0]._responseData) {
+        credentialsToSearch = credentialsData[0].items ? credentialsData[0].items.map(i => i.json) : [credentialsData[0]._responseData];
       }
 
       const driver = credentialsToSearch.find(d => {
@@ -181,12 +177,16 @@ export const getDrivers = async () => {
 };
 
 export const addDriver = async (driverData) => {
-  cache.drivers = null;
+  if (cache.drivers && Array.isArray(cache.drivers)) {
+    cache.drivers.push(driverData);
+  }
   return await postToN8n('addDriver', driverData);
 };
 
 export const removeDriver = async (id) => {
-  cache.drivers = null;
+  if (cache.drivers && Array.isArray(cache.drivers)) {
+    cache.drivers = cache.drivers.filter(d => String(d.id || d._rowIndex) !== String(id));
+  }
   return await postToN8n('removeDriver', { id });
 };
 
@@ -208,13 +208,17 @@ export const getVehicles = async () => {
 };
 
 export const addVehicle = async (vehicleData) => {
-  cache.vehicles = null;
+  if (cache.vehicles && Array.isArray(cache.vehicles)) {
+    cache.vehicles.push(vehicleData);
+  }
   cache.stats = null;
   return await postToN8n('addVehicle', vehicleData);
 };
 
 export const removeVehicle = async (id) => {
-  cache.vehicles = null;
+  if (cache.vehicles && Array.isArray(cache.vehicles)) {
+    cache.vehicles = cache.vehicles.filter(v => String(v.id || v._rowIndex) !== String(id));
+  }
   cache.stats = null;
   return await postToN8n('removeVehicle', { id });
 };

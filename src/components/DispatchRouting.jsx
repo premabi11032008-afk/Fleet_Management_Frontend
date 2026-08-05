@@ -7,9 +7,9 @@ import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconAnchor: [12, 41]
+  iconUrl: icon,
+  shadowUrl: iconShadow,
+  iconAnchor: [12, 41]
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
@@ -28,16 +28,15 @@ export default function DispatchRouting() {
   const [vehicles, setVehicles] = useState([]);
   const [selectedDriver, setSelectedDriver] = useState('');
   const [selectedVehicle, setSelectedVehicle] = useState('');
-  
-  const [startCoords, setStartCoords] = useState(null); 
+
+  const [startCoords, setStartCoords] = useState(null);
   const [endCoords, setEndCoords] = useState(null);
-  
+
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
-      // Fetch user location via IP for default center
       let initialCenter = [28.6139, 77.2090]; // Default Delhi
       try {
         const res = await fetch('https://ipapi.co/json/');
@@ -69,7 +68,7 @@ export default function DispatchRouting() {
 
   const handleDispatch = async () => {
     if (!selectedDriver || !selectedVehicle || !endCoords) return;
-    
+
     setLoading(true);
     await assignRoute(selectedVehicle, selectedDriver, startCoords, endCoords);
     setLoading(false);
@@ -77,18 +76,31 @@ export default function DispatchRouting() {
     setTimeout(() => {
       setSuccess(false);
       setEndCoords(null);
+      setRoutePathPoints(null);
       setSelectedDriver('');
       setSelectedVehicle('');
-      // refresh vehicles to remove the dispatched one from 'Idle'
       getVehicles().then(v => setVehicles(v.filter(vh => vh.status === 'Idle')));
     }, 3000);
   };
 
+  const [routePathPoints, setRoutePathPoints] = useState(null);
+
   // Component to handle map clicks
   function MapClickHandler() {
     useMapEvents({
-      click(e) {
-        setEndCoords([e.latlng.lat, e.latlng.lng]);
+      async click(e) {
+        const dest = [e.latlng.lat, e.latlng.lng];
+        setEndCoords(dest);
+        setRoutePathPoints(null);
+
+        if (startCoords) {
+          // Dynamically fetch the real path from the backend
+          const { getRoutePath } = await import('../api/apiEndpoints');
+          const path = await getRoutePath(startCoords, dest);
+          if (path && path.length > 0) {
+            setRoutePathPoints(path);
+          }
+        }
       },
     });
     return null;
@@ -108,11 +120,11 @@ export default function DispatchRouting() {
       )}
 
       <div style={{ display: 'flex', gap: '24px', flex: 1, minHeight: '500px' }}>
-        
+
         {/* Left Side: Controls */}
         <div className="glass-panel" style={{ width: '350px', display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ marginBottom: '24px' }}>Assignment Details</h3>
-          
+
           <div className="form-group">
             <label>Select Available Vehicle</label>
             <select value={selectedVehicle} onChange={e => setSelectedVehicle(e.target.value)}>
@@ -142,8 +154,8 @@ export default function DispatchRouting() {
             )}
           </div>
 
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             style={{ marginTop: 'auto', width: '100%' }}
             disabled={!selectedDriver || !selectedVehicle || !endCoords || loading}
             onClick={handleDispatch}
@@ -160,7 +172,7 @@ export default function DispatchRouting() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              
+
               <MapClickHandler />
 
               {/* Start Marker */}
@@ -178,9 +190,11 @@ export default function DispatchRouting() {
               )}
 
               {/* Route Line */}
-              {selectedVehicle && endCoords && (
+              {routePathPoints ? (
+                <Polyline positions={routePathPoints} color="var(--primary)" weight={5} />
+              ) : selectedVehicle && endCoords ? (
                 <Polyline positions={[startCoords, endCoords]} color="var(--primary)" weight={4} dashArray="10, 10" />
-              )}
+              ) : null}
             </MapContainer>
           )}
         </div>
