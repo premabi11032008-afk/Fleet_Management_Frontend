@@ -11,16 +11,25 @@ import Login from './components/Login';
 import './index.css';
 
 function App() {
-  const [user, setUser] = useState(null); // { role: 'manager' | 'driver', username: string }
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [user, setUser] = useState(() => {
+    const saved = sessionStorage.getItem('ifms_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [currentView, setCurrentView] = useState(() => {
+    const saved = sessionStorage.getItem('ifms_user');
+    const parsedUser = saved ? JSON.parse(saved) : null;
+    return parsedUser?.role === 'driver' ? 'driver_portal' : 'dashboard';
+  });
 
   const handleLogin = (userData) => {
     setUser(userData);
+    sessionStorage.setItem('ifms_user', JSON.stringify(userData));
     setCurrentView(userData.role === 'manager' ? 'dashboard' : 'driver_portal');
   };
 
   const handleLogout = () => {
     setUser(null);
+    sessionStorage.removeItem('ifms_user');
   };
 
   if (!user) {
@@ -55,13 +64,13 @@ function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar 
-        currentView={currentView} 
-        setCurrentView={setCurrentView} 
-        onLogout={handleLogout} 
-        user={user} 
+      <Sidebar
+        currentView={currentView}
+        setCurrentView={setCurrentView}
+        onLogout={handleLogout}
+        user={user}
       />
-      
+
       <main className="main-content">
         {renderContent()}
       </main>

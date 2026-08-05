@@ -1,5 +1,12 @@
 const API_BASE_URL = import.meta.env.VITE_N8N_BASE_URL;
 
+const cache = {
+  stats: null,
+  activeTrips: null,
+  drivers: null,
+  vehicles: null
+};
+
 const fetchAPI = async (actionName, options = {}) => {
   try {
     let payloadData = null;
@@ -81,43 +88,50 @@ export const authenticateUser = async (role, username, password) => {
 
 // --- Stats & Dashboard ---
 export const getFleetStats = async () => {
+  if (cache.stats) return cache.stats;
   try {
     const res = await fetchAPI('getFleetStats');
     let vehicles = res.documents || [];
     vehicles = vehicles.map(doc => {
       if (doc.body && doc.body.data) {
-        return { _id: doc._id, ...doc.body.data };
+        return { id: doc._id, _id: doc._id, status: 'Idle', ...doc.body.data };
       }
       return doc;
     });
-    return {
+    cache.stats = {
       totalVehicles: vehicles.length,
       travellingCount: vehicles.filter(v => v.status === 'Travelling').length,
       idleCount: vehicles.filter(v => v.status === 'Idle').length,
       maintenanceCount: vehicles.filter(v => v.status === 'Maintenance').length
     };
+    return cache.stats;
   } catch (e) {
     return { totalVehicles: 0, travellingCount: 0, idleCount: 0, maintenanceCount: 0 };
   }
 };
 
 export const getActiveTrips = async () => {
+  if (cache.activeTrips) return cache.activeTrips;
   try {
     const res = await fetchAPI('getActiveTrips');
     let docs = res.documents || [];
     docs = docs.map(doc => {
       if (doc.body && doc.body.data) {
-        return { _id: doc._id, ...doc.body.data };
+        return { id: doc._id, _id: doc._id, ...doc.body.data };
       }
       return doc;
     });
-    return docs.filter(t => t.status === 'Travelling');
+    cache.activeTrips = docs.filter(t => t.status === 'Travelling');
+    return cache.activeTrips;
   } catch (e) {
     return [];
   }
 };
 
 export const assignRoute = async (vehicleId, driverId, startCoords, endCoords) => {
+  cache.activeTrips = null;
+  cache.vehicles = null;
+  cache.stats = null;
   return fetchAPI('assignRoute', {
     method: 'POST',
     body: JSON.stringify({
@@ -137,12 +151,47 @@ export const getRoutePath = async (startCoords, endCoords) => {
       method: 'POST',
       body: JSON.stringify({ startCoords, endCoords }),
     });
-    // OpenRouteService returns features[0].geometry.coordinates as [lng, lat]
-    if (res.features && res.features[0] && res.features[0].geometry) {
-      const coords = res.features[0].geometry.coordinates;
-      // Convert [lng, lat] to [lat, lng] for Leaflet
-      return coords.map(c => [c[1], c[0]]);
+
+    let data = res;
+    if (res.items && res.items.length > 0 && res.items[0].json) {
+      data = res.items[0].json;
     }
+
+    // If it returns standard GeoJSON
+    if (data.features && data.features[0] && data.features[0].geometry) {
+      const coords = data.features[0].geometry.coordinates;
+      return coords.map(c => [c[1], c[0]]); // Convert [lng, lat] to [lat, lng]
+    }
+    
+    // If it returns standard OpenRouteService JSON (encoded polyline)
+    if (data.routes && data.routes[0] && data.routes[0].geometry) {
+      const encoded = data.routes[0].geometry;
+      let points = [];
+      let index = 0, len = encoded.length;
+      let lat = 0, lng = 0;
+      while (index < len) {
+        let b, shift = 0, result = 0;
+        do {
+          b = encoded.charCodeAt(index++) - 63;
+          result |= (b & 0x1f) << shift;
+          shift += 5;
+        } while (b >= 0x20);
+        let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lat += dlat;
+        shift = 0;
+        result = 0;
+        do {
+          b = encoded.charCodeAt(index++) - 63;
+          result |= (b & 0x1f) << shift;
+          shift += 5;
+        } while (b >= 0x20);
+        let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lng += dlng;
+        points.push([lat / 1E5, lng / 1E5]);
+      }
+      return points;
+    }
+
     return null;
   } catch (e) {
     console.error("Error fetching route path:", e);
@@ -151,15 +200,17 @@ export const getRoutePath = async (startCoords, endCoords) => {
 };
 
 export const getDrivers = async () => {
+  if (cache.drivers) return cache.drivers;
   try {
     const res = await fetchAPI('getDrivers');
     const docs = res.documents || [];
-    return docs.map(doc => {
+    cache.drivers = docs.map(doc => {
       if (doc.body && doc.body.data) {
-        return { _id: doc._id, ...doc.body.data };
+        return { id: doc._id, _id: doc._id, status: 'Active', ...doc.body.data };
       }
       return doc;
     });
+    return cache.drivers;
   } catch (e) {
     return [];
   }
@@ -175,8 +226,13 @@ export const addDriver = async (driverData) => {
     ...driverData,
     username,
     password,
-    role: 'driver'
+    role: 'driver',
+    status: 'Active'
   };
+
+  if (cache.drivers) {
+    cache.drivers.push({ _id: Date.now().toString(), ...payload });
+  }
 
   await fetchAPI('addDriver', {
     method: 'POST',
@@ -187,6 +243,9 @@ export const addDriver = async (driverData) => {
 };
 
 export const removeDriver = async (id) => {
+  if (cache.drivers) {
+    cache.drivers = cache.drivers.filter(d => d._id !== id && d.id !== id);
+  }
   return fetchAPI('removeDriver', {
     method: 'POST',
     body: JSON.stringify({ _id: id }),
@@ -195,28 +254,43 @@ export const removeDriver = async (id) => {
 
 // --- Vehicles ---
 export const getVehicles = async () => {
+  if (cache.vehicles) return cache.vehicles;
   try {
     const res = await fetchAPI('getVehicles');
     let docs = res.documents || [];
-    return docs.map(doc => {
+    cache.vehicles = docs.map(doc => {
       if (doc.body && doc.body.data) {
-        return { _id: doc._id, ...doc.body.data };
+        return { id: doc._id, _id: doc._id, status: 'Idle', ...doc.body.data };
       }
       return doc;
     });
+    return cache.vehicles;
   } catch (e) {
     return [];
   }
 };
 
 export const addVehicle = async (vehicleData) => {
+  const payload = {
+    ...vehicleData,
+    status: 'Idle' // Set default status so it appears in Dispatch Roster
+  };
+
+  if (cache.vehicles) {
+    cache.vehicles.push({ _id: Date.now().toString(), ...payload });
+  }
+  cache.stats = null;
   return fetchAPI('addVehicle', {
     method: 'POST',
-    body: JSON.stringify(vehicleData),
+    body: JSON.stringify(payload),
   });
 };
 
 export const removeVehicle = async (id) => {
+  if (cache.vehicles) {
+    cache.vehicles = cache.vehicles.filter(v => v._id !== id && v.id !== id);
+  }
+  cache.stats = null;
   return fetchAPI('removeVehicle', {
     method: 'POST',
     body: JSON.stringify({ _id: id }),
