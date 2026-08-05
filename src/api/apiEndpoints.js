@@ -4,7 +4,33 @@ const cache = {
   stats: null,
   activeTrips: null,
   drivers: null,
-  vehicles: null
+  vehicles: null,
+  routes: new Map()
+};
+
+const normalizeId = (idObj) => {
+  if (!idObj) return idObj;
+  if (typeof idObj === 'string') return idObj;
+
+  // Sometimes it's { type: 'Buffer', data: [...] }
+  if (idObj.type === 'Buffer' && Array.isArray(idObj.data) && idObj.data.length === 12) {
+    return idObj.data.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Sometimes it's { buffer: { 0: 106, 1: 113, ... } } or { buffer: [106, 113, ...] }
+  if (idObj.buffer) {
+    const bytes = Array.isArray(idObj.buffer) ? idObj.buffer : Object.values(idObj.buffer);
+    if (bytes && bytes.length === 12) {
+      return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  }
+
+  // Sometimes it's { id: { type: 'Buffer', data: [...] } }
+  if (idObj.id && idObj.id.type === 'Buffer' && Array.isArray(idObj.id.data) && idObj.id.data.length === 12) {
+    return idObj.id.data.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  return idObj;
 };
 
 const fetchAPI = async (actionName, options = {}) => {
@@ -71,10 +97,11 @@ export const authenticateUser = async (role, username, password) => {
 
     let docs = res.documents || [];
     docs = docs.map(doc => {
+      const normalizedId = normalizeId(doc._id);
       if (doc.body && doc.body.data) {
-        return { _id: doc._id, ...doc.body.data };
+        return { _id: normalizedId, ...doc.body.data };
       }
-      return doc;
+      return { ...doc, _id: normalizedId };
     });
 
     const userDoc = docs.find(u => u.username === username && u.password === password);
@@ -90,14 +117,7 @@ export const authenticateUser = async (role, username, password) => {
 export const getFleetStats = async () => {
   if (cache.stats) return cache.stats;
   try {
-    const res = await fetchAPI('getFleetStats');
-    let vehicles = res.documents || [];
-    vehicles = vehicles.map(doc => {
-      if (doc.body && doc.body.data) {
-        return { id: doc._id, _id: doc._id, status: 'Idle', ...doc.body.data };
-      }
-      return doc;
-    });
+    const vehicles = await getVehicles();
     cache.stats = {
       totalVehicles: vehicles.length,
       travellingCount: vehicles.filter(v => v.status === 'Travelling').length,
@@ -116,10 +136,11 @@ export const getActiveTrips = async () => {
     const res = await fetchAPI('getActiveTrips');
     let docs = res.documents || [];
     docs = docs.map(doc => {
+      const normalizedId = normalizeId(doc._id);
       if (doc.body && doc.body.data) {
-        return { id: doc._id, _id: doc._id, ...doc.body.data };
+        return { id: normalizedId, _id: normalizedId, ...doc.body.data };
       }
-      return doc;
+      return { ...doc, _id: normalizedId, id: normalizedId };
     });
     cache.activeTrips = docs.filter(t => t.status === 'Travelling');
     return cache.activeTrips;
@@ -132,20 +153,37 @@ export const assignRoute = async (vehicleId, driverId, startCoords, endCoords) =
   cache.activeTrips = null;
   cache.vehicles = null;
   cache.stats = null;
+  
+  // Resolve vehicle and driver details
+  const vehicles = await getVehicles();
+  const drivers = await getDrivers();
+  const vehicle = vehicles.find(v => v.id === vehicleId || v._id === vehicleId);
+  const driver = drivers.find(d => d.id === driverId || d._id === driverId);
+
   return fetchAPI('assignRoute', {
     method: 'POST',
     body: JSON.stringify({
       vehicleId,
       driverId,
+      make: vehicle?.make,
+      model: vehicle?.model,
+      plate: vehicle?.plate,
+      driver: driver?.username || driver?.name,
       startCoords,
       endCoords,
       currentCoords: startCoords,
-      status: 'Travelling'
+      status: 'Travelling',
+      location: 'En Route'
     }),
   });
 };
 
 export const getRoutePath = async (startCoords, endCoords) => {
+  const cacheKey = JSON.stringify({ startCoords, endCoords });
+  if (cache.routes.has(cacheKey)) {
+    return cache.routes.get(cacheKey);
+  }
+
   try {
     const res = await fetchAPI('getRoutePath', {
       method: 'POST',
@@ -157,10 +195,37 @@ export const getRoutePath = async (startCoords, endCoords) => {
       data = res.items[0].json;
     }
 
+    // AgentBuilder HTTP Node might return the body as a base64 string or JSON string
+    if (data.body && typeof data.body === 'string') {
+      try {
+        // Try decoding base64 first. Use TextDecoder for proper UTF-8 support
+        const text = atob(data.body);
+        const bytes = new Uint8Array(text.length);
+        for (let i = 0; i < text.length; i++) {
+          bytes[i] = text.charCodeAt(i);
+        }
+        const decoded = new TextDecoder().decode(bytes);
+        data = JSON.parse(decoded);
+      } catch (e) {
+        console.warn('Failed to parse base64, trying direct JSON parse', e);
+        try {
+          // If not base64, try parsing as regular JSON string
+          data = JSON.parse(data.body);
+        } catch (err) {
+          console.error('Failed to parse route data:', err);
+          // Keep data as is if parsing fails
+        }
+      }
+    } else if (data.body && typeof data.body === 'object') {
+      data = data.body;
+    }
+
     // If it returns standard GeoJSON
     if (data.features && data.features[0] && data.features[0].geometry) {
       const coords = data.features[0].geometry.coordinates;
-      return coords.map(c => [c[1], c[0]]); // Convert [lng, lat] to [lat, lng]
+      const points = coords.map(c => [c[1], c[0]]); // Convert [lng, lat] to [lat, lng]
+      cache.routes.set(cacheKey, points);
+      return points;
     }
     
     // If it returns standard OpenRouteService JSON (encoded polyline)
@@ -189,6 +254,7 @@ export const getRoutePath = async (startCoords, endCoords) => {
         lng += dlng;
         points.push([lat / 1E5, lng / 1E5]);
       }
+      cache.routes.set(cacheKey, points);
       return points;
     }
 
@@ -205,10 +271,11 @@ export const getDrivers = async () => {
     const res = await fetchAPI('getDrivers');
     const docs = res.documents || [];
     cache.drivers = docs.map(doc => {
+      const normalizedId = normalizeId(doc._id);
       if (doc.body && doc.body.data) {
-        return { id: doc._id, _id: doc._id, status: 'Active', ...doc.body.data };
+        return { id: normalizedId, _id: normalizedId, status: 'Active', ...doc.body.data };
       }
-      return doc;
+      return { ...doc, _id: normalizedId, id: normalizedId };
     });
     return cache.drivers;
   } catch (e) {
@@ -259,10 +326,11 @@ export const getVehicles = async () => {
     const res = await fetchAPI('getVehicles');
     let docs = res.documents || [];
     cache.vehicles = docs.map(doc => {
+      const normalizedId = normalizeId(doc._id);
       if (doc.body && doc.body.data) {
-        return { id: doc._id, _id: doc._id, status: 'Idle', ...doc.body.data };
+        return { id: normalizedId, _id: normalizedId, status: 'Idle', ...doc.body.data };
       }
-      return doc;
+      return { ...doc, _id: normalizedId, id: normalizedId };
     });
     return cache.vehicles;
   } catch (e) {
