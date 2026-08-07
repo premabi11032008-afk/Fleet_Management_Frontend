@@ -9,6 +9,8 @@ import AddVehicle from './components/AddVehicle';
 import DriverPortal from './components/DriverPortal';
 import Login from './components/Login';
 import Chatbot from './components/Chatbot';
+import Documentation from './components/Documentation';
+import SupportBubble from './components/SupportBubble';
 import './index.css';
 
 function App() {
@@ -34,7 +36,12 @@ function App() {
   };
 
   if (!user) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <>
+        <Login onLogin={handleLogin} />
+        <SupportBubble />
+      </>
+    );
   }
 
   const renderContent = () => {
@@ -58,6 +65,8 @@ function App() {
         return <AddVehicle />;
       case 'driver_portal':
         return <DriverPortal user={user} />;
+      case 'docs':
+        return <Documentation />;
       default:
         return <Dashboard />;
     }
@@ -77,6 +86,7 @@ function App() {
       </main>
 
       <Chatbot />
+      <SupportBubble />
     </div>
   );
 }

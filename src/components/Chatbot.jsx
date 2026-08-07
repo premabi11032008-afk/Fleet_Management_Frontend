@@ -30,20 +30,20 @@ const Chatbot = () => {
     try {
       // 1. Call the AI Intent Parser Webhook
       const aiWebhookUrl = import.meta.env.VITE_CHATBOT_WEBHOOK_URL;
-      
+
       // Limit history to the last 10 messages to prevent context overflow
-      const chatHistory = newHistory.slice(-10).map(m => ({ 
-        role: m.sender === 'user' ? 'user' : 'assistant', 
-        content: m.text 
+      const chatHistory = newHistory.slice(-10).map(m => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.text
       }));
 
       // Fetch live fleet state to provide context to the LLM (caching makes this fast)
       const allVehicles = await getVehicles();
       const allDrivers = await getDrivers();
-      
+
       const systemContext = {
-         availableVehicles: allVehicles.filter(v => v.status === 'Idle').map(v => ({ id: v.id || v._id, make: v.make, model: v.model, plate: v.plate })),
-         allDrivers: allDrivers.map(d => ({ id: d.id || d._id, name: d.name, username: d.username }))
+        availableVehicles: allVehicles.filter(v => v.status === 'Idle').map(v => ({ id: v.id || v._id, make: v.make, model: v.model, plate: v.plate })),
+        allDrivers: allDrivers.map(d => ({ id: d.id || d._id, name: d.name, username: d.username }))
       };
 
       const response = await fetch(aiWebhookUrl, {
@@ -57,31 +57,31 @@ const Chatbot = () => {
       }
 
       const data = await response.json();
-      
+
       // Handle n8n standard output format
       const intentData = data.body || (data.items && data.items[0] && data.items[0].json) || data;
-      
+
       let intentObj = {};
       try {
         // Sometimes n8n returns a stringified JSON body
         let parsed = typeof intentData === 'string' ? JSON.parse(intentData) : intentData;
-        
+
         // AgentBuilder puts the LLM output in the 'response' property as a string
         if (parsed && parsed.response && typeof parsed.response === 'string') {
-            try {
-                // Attempt to parse the inner JSON string from 'response'
-                parsed = JSON.parse(parsed.response.replace(/```json/g, '').replace(/```/g, '').trim());
-            } catch(e) {
-                // If it fails, keep the original parsed object
-                console.warn("Could not parse inner response as JSON", e);
-            }
+          try {
+            // Attempt to parse the inner JSON string from 'response'
+            parsed = JSON.parse(parsed.response.replace(/```json/g, '').replace(/```/g, '').trim());
+          } catch (e) {
+            // If it fails, keep the original parsed object
+            console.warn("Could not parse inner response as JSON", e);
+          }
         }
 
         // If it's still a string (double encoded), parse again
         if (typeof parsed === 'string') {
-            parsed = JSON.parse(parsed.replace(/```json/g, '').replace(/```/g, '').trim());
+          parsed = JSON.parse(parsed.replace(/```json/g, '').replace(/```/g, '').trim());
         }
-        
+
         intentObj = parsed;
       } catch (e) {
         console.error("Failed to parse AI response:", e);
@@ -110,64 +110,66 @@ const Chatbot = () => {
 
       // 2. Execute Backend API calls based on intent
       if (intent === 'addDriver' && parameters) {
-         try {
-            const newDriver = await addDriver({ 
-              name: parameters.name, 
-              licenseNumber: parameters.licenseNumber || 'PENDING' 
-            });
-            botReply = (reply ? reply + "\n\n" : "") + `✅ Driver ${newDriver.name} added successfully! (Username: ${newDriver.username})`;
-         } catch (e) {
-            botReply = "Sorry, I couldn't add the driver at this moment.";
-         }
+        try {
+          const newDriver = await addDriver({
+            name: parameters.name,
+            licenseNumber: parameters.licenseNumber || 'PENDING'
+          });
+          botReply = (reply ? reply + "\n\n" : "");
+        } catch (e) {
+          botReply = "Sorry, I couldn't add the driver at this moment.";
+        }
       } else if (intent === 'addVehicle' && parameters) {
-         try {
-            const newVehicle = await addVehicle({ 
-              make: parameters.make || 'Unknown Make', 
-              model: parameters.model || 'Unknown Model',
-              plate: parameters.plate || 'PENDING',
-              year: parameters.year || new Date().getFullYear(),
-              vin: parameters.vin || 'PENDING'
-            });
-            botReply = (reply ? reply + "\n\n" : "") + `✅ Vehicle ${newVehicle.make} ${newVehicle.model} (${newVehicle.plate}) added successfully!`;
-         } catch (e) {
-            botReply = "Sorry, I couldn't add the vehicle at this moment.";
-         }
+        try {
+          const newVehicle = await addVehicle({
+            make: parameters.make || 'Unknown Make',
+            model: parameters.model || 'Unknown Model',
+            plate: parameters.plate || 'PENDING',
+            year: parameters.year || new Date().getFullYear(),
+            vin: parameters.vin || 'PENDING'
+          });
+          botReply = (reply ? reply + "\n\n" : "");
+        } catch (e) {
+          botReply = "Sorry, I couldn't add the vehicle at this moment.";
+        }
       } else if (intent === 'getRoutePath' && parameters) {
-         try {
-            const start = await geocodeLocation(parameters.startCoords);
-            const end = await geocodeLocation(parameters.endCoords);
-            const route = await getRoutePath(start, end);
-            if (route && route.points) {
-               const distKm = (route.distance / 1000).toFixed(1);
-               const timeMin = Math.round(route.duration / 60);
-               botReply = (reply ? reply + "\n\n" : "") + `✅ Route calculated successfully! Approximate distance: ${distKm} km, Est. time: ${timeMin} mins. Details are on the map.`;
-            } else {
-               botReply = (reply ? reply + "\n\n" : "") + "❌ Failed to calculate route.";
-            }
-         } catch(e) {
-            botReply = "Sorry, I couldn't calculate the route.";
-         }
+        try {
+          const start = await geocodeLocation(parameters.startCoords);
+          const end = await geocodeLocation(parameters.endCoords);
+          const routes = await getRoutePath(start, end);
+          const route = routes && Array.isArray(routes) ? routes[0] : routes;
+          if (route && route.points) {
+            const distKm = (route.distance / 1000).toFixed(1);
+            const timeMin = Math.round(route.duration / 60);
+            botReply = (reply ? reply + "\n\n" : "") + `Approximate distance: ${distKm} km, Est. time: ${timeMin} mins. Details are on the map.`;
+          } else {
+            botReply = (reply ? reply + "\n\n" : "");
+          }
+        } catch (e) {
+          botReply = "Sorry, I couldn't calculate the route.";
+        }
       } else if (intent === 'assignRoute' && parameters) {
-         try {
-            const start = await geocodeLocation(parameters.startCoords);
-            const end = await geocodeLocation(parameters.endCoords);
-            const route = await getRoutePath(start, end);
-            await assignRoute(parameters.vehicleId, parameters.driverId, start, end);
-            if (route && route.distance > 0) {
-               const distKm = (route.distance / 1000).toFixed(1);
-               const timeMin = Math.round(route.duration / 60);
-               botReply = (reply ? reply + "\n\n" : "") + `✅ Route successfully assigned and vehicle dispatched! (Distance: ${distKm} km, Est: ${timeMin} mins)`;
-            } else {
-               botReply = (reply ? reply + "\n\n" : "") + `✅ Route successfully assigned and vehicle dispatched!`;
-            }
-         } catch(e) {
-            botReply = "Sorry, I couldn't assign the route right now.";
-         }
+        try {
+          const start = await geocodeLocation(parameters.startCoords);
+          const end = await geocodeLocation(parameters.endCoords);
+          const routes = await getRoutePath(start, end);
+          const route = routes && Array.isArray(routes) ? routes[0] : routes;
+          await assignRoute(parameters.vehicleId, parameters.driverId, start, end);
+          if (route && route.distance > 0) {
+            const distKm = (route.distance / 1000).toFixed(1);
+            const timeMin = Math.round(route.duration / 60);
+            botReply = (reply ? reply + "\n\n" : "") + `✅ Route successfully assigned and vehicle dispatched! (Distance: ${distKm} km, Est: ${timeMin} mins)`;
+          } else {
+            botReply = (reply ? reply + "\n\n" : "") + `✅ Route successfully assigned and vehicle dispatched!`;
+          }
+        } catch (e) {
+          botReply = "Sorry, I couldn't assign the route right now.";
+        }
       }
 
       // 3. Fallback if no intent matched and no reply provided
       if (!botReply) {
-          botReply = "I didn't quite understand that.";
+        botReply = "I didn't quite understand that.";
       }
 
       setMessages(prev => [...prev, { text: botReply, sender: 'bot' }]);
@@ -183,7 +185,7 @@ const Chatbot = () => {
     <div className={`chatbot-container ${isOpen ? 'open' : ''}`}>
       {!isOpen && (
         <button className="chatbot-toggle" onClick={() => setIsOpen(true)}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10-1.66 0-3.218-.41-4.58-1.129L2 22l1.129-5.42C2.41 15.218 2 13.66 2 12 2 6.477 6.477 2 12 2z"></path><path d="M8 12h.01"></path><path d="M12 12h.01"></path><path d="M16 12h.01"></path></svg>
         </button>
       )}
 
@@ -196,7 +198,7 @@ const Chatbot = () => {
             </div>
             <button className="chatbot-close" onClick={() => setIsOpen(false)}>×</button>
           </div>
-          
+
           <div className="chatbot-messages">
             {messages.map((msg, idx) => (
               <div key={idx} className={`message-bubble ${msg.sender} ${msg.error ? 'error' : ''}`}>
@@ -212,9 +214,9 @@ const Chatbot = () => {
           </div>
 
           <div className="chatbot-input">
-            <input 
-              type="text" 
-              placeholder="Ask me anything..." 
+            <input
+              type="text"
+              placeholder="Ask me anything..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}

@@ -60,7 +60,7 @@ export default function Login({ onLogin }) {
               <label>Username or Email</label>
               <input 
                 type="text" 
-                placeholder={role === 'manager' ? "manager@fleet.com" : "e.g. jdoe_831"}
+                placeholder={role === 'manager' ? "e.g. manager_fleet1" : "e.g. jdoe_831"}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />

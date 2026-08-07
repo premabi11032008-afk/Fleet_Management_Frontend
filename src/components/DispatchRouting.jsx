@@ -84,8 +84,8 @@ export default function DispatchRouting() {
     }, 3000);
   };
 
-  const [routePathPoints, setRoutePathPoints] = useState(null);
-  const [routeStats, setRouteStats] = useState(null);
+  const [availableRoutes, setAvailableRoutes] = useState([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
 
   // Component to handle map clicks
   function MapClickHandler() {
@@ -93,22 +93,28 @@ export default function DispatchRouting() {
       async click(e) {
         const dest = [e.latlng.lat, e.latlng.lng];
         setEndCoords(dest);
-        setRoutePathPoints(null);
-        setRouteStats(null);
+        setAvailableRoutes([]);
+        setSelectedRouteIndex(0);
 
         if (startCoords) {
           // Dynamically fetch the real path from the backend
           const { getRoutePath } = await import('../api/apiEndpoints');
-          const route = await getRoutePath(startCoords, dest);
-          if (route && route.points && route.points.length > 0) {
-            setRoutePathPoints(route.points);
-            setRouteStats({ distance: route.distance, duration: route.duration });
+          const routes = await getRoutePath(startCoords, dest);
+          if (routes && Array.isArray(routes) && routes.length > 0) {
+            setAvailableRoutes(routes);
+          } else if (routes && routes.points) {
+            // Fallback for single route
+            setAvailableRoutes([routes]);
           }
         }
       },
     });
     return null;
   }
+
+  const handleRouteSelect = (index) => {
+    setSelectedRouteIndex(index);
+  };
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -156,16 +162,33 @@ export default function DispatchRouting() {
             ) : (
               <div>
                 <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--status-idle)' }}>Destination set.</p>
-                {routeStats && routeStats.distance > 0 && (
-                  <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
-                    <div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Est. Distance</span>
-                      <span style={{ fontWeight: '600' }}>{(routeStats.distance / 1000).toFixed(1)} km</span>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Est. Time</span>
-                      <span style={{ fontWeight: '600' }}>{Math.round(routeStats.duration / 60)} min</span>
-                    </div>
+                {availableRoutes.length > 0 && (
+                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px' }}>Available Routes</p>
+                    {availableRoutes.map((route, idx) => (
+                      <div 
+                        key={idx} 
+                        onClick={() => handleRouteSelect(idx)}
+                        style={{ 
+                          padding: '8px', 
+                          marginBottom: '8px',
+                          border: selectedRouteIndex === idx ? '2px solid var(--primary)' : '1px solid var(--border-color)',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          backgroundColor: selectedRouteIndex === idx ? 'rgba(59, 130, 246, 0.05)' : 'transparent',
+                          display: 'flex',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: selectedRouteIndex === idx ? '600' : '400', fontSize: '0.875rem' }}>Route {idx + 1}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: '600', fontSize: '0.875rem' }}>{(route.distance / 1000).toFixed(1)} km</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{Math.round(route.duration / 60)} min</div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -201,17 +224,27 @@ export default function DispatchRouting() {
               )}
 
               {/* Destination Marker */}
-              {endCoords && Array.isArray(endCoords) && ( <Marker position={endCoords} icon={destIcon}>
+              {endCoords && Array.isArray(endCoords) && ( 
+                <Marker position={endCoords} icon={destIcon}>
                   <Popup>Assigned Destination</Popup>
                 </Marker>
               )}
 
-              {/* Route Line */}
-              {routePathPoints ? (
-                <Polyline positions={routePathPoints} color="var(--primary)" weight={5} />
-              ) : selectedVehicle && startCoords && Array.isArray(startCoords) && endCoords && Array.isArray(endCoords) ? (
+              {/* Route Lines */}
+              {availableRoutes.map((route, idx) => {
+                if (idx !== selectedRouteIndex) {
+                  return <Polyline key={idx} positions={route.points} color="#94a3b8" weight={3} dashArray="5, 5" opacity={0.6} />;
+                }
+                return null;
+              })}
+              {/* Selected route rendered last so it's on top */}
+              {availableRoutes.length > 0 && (
+                <Polyline positions={availableRoutes[selectedRouteIndex].points} color="var(--primary)" weight={5} />
+              )}
+              
+              {!availableRoutes.length && selectedVehicle && startCoords && Array.isArray(startCoords) && endCoords && Array.isArray(endCoords) && (
                 <Polyline positions={[startCoords, endCoords]} color="var(--primary)" weight={4} dashArray="10, 10" />
-              ) : null}
+              )}
             </MapContainer>
           )}
         </div>

@@ -292,7 +292,7 @@ input:focus, select:focus, textarea:focus {
   width: 60px;
   height: 60px;
   border-radius: 50%;
-  background: #e2e8f0;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
   color: white;
   border: none;
   cursor: pointer;

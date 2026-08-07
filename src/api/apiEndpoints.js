@@ -1,11 +1,25 @@
 const API_BASE_URL = import.meta.env.VITE_N8N_BASE_URL;
 
+const loadRoutesCache = () => {
+  try {
+    const saved = localStorage.getItem('routesCache');
+    if (saved) return new Map(JSON.parse(saved));
+  } catch(e) {}
+  return new Map();
+};
+
 const cache = {
   stats: null,
   activeTrips: null,
   drivers: null,
   vehicles: null,
-  routes: new Map()
+  routes: loadRoutesCache()
+};
+
+const saveRoutesCache = () => {
+  try {
+    localStorage.setItem('routesCache', JSON.stringify(Array.from(cache.routes.entries())));
+  } catch(e) {}
 };
 
 const normalizeId = (idObj) => {
@@ -190,6 +204,33 @@ export const cancelRoute = async (tripId, vehicleId) => {
   });
 };
 
+const decodePolyline = (encoded) => {
+  let points = [];
+  let index = 0, len = encoded.length;
+  let lat = 0, lng = 0;
+  while (index < len) {
+    let b, shift = 0, result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lat += dlat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lng += dlng;
+    points.push([lat / 1E5, lng / 1E5]);
+  }
+  return points;
+};
+
 export const getRoutePath = async (startCoords, endCoords) => {
   const cacheKey = JSON.stringify({ startCoords, endCoords });
   if (cache.routes.has(cacheKey)) {
@@ -199,7 +240,12 @@ export const getRoutePath = async (startCoords, endCoords) => {
   try {
     const res = await fetchAPI('getRoutePath', {
       method: 'POST',
-      body: JSON.stringify({ startCoords, endCoords }),
+      body: JSON.stringify({ 
+        startCoords, 
+        endCoords, 
+        alternatives: true, 
+        options: { avoid_features: ['highways'], alternatives: 3 } 
+      }),
     });
 
     let data = res;
@@ -210,7 +256,6 @@ export const getRoutePath = async (startCoords, endCoords) => {
     // AgentBuilder HTTP Node might return the body as a base64 string or JSON string
     if (data.body && typeof data.body === 'string') {
       try {
-        // Try decoding base64 first. Use TextDecoder for proper UTF-8 support
         const text = atob(data.body);
         const bytes = new Uint8Array(text.length);
         for (let i = 0; i < text.length; i++) {
@@ -221,11 +266,9 @@ export const getRoutePath = async (startCoords, endCoords) => {
       } catch (e) {
         console.warn('Failed to parse base64, trying direct JSON parse', e);
         try {
-          // If not base64, try parsing as regular JSON string
           data = JSON.parse(data.body);
         } catch (err) {
           console.error('Failed to parse route data:', err);
-          // Keep data as is if parsing fails
         }
       }
     } else if (data.body && typeof data.body === 'object') {
@@ -233,56 +276,30 @@ export const getRoutePath = async (startCoords, endCoords) => {
     }
 
     // If it returns standard GeoJSON
-    if (data.features && data.features[0] && data.features[0].geometry) {
-      const coords = data.features[0].geometry.coordinates;
-      const points = coords.map(c => [c[1], c[0]]); // Convert [lng, lat] to [lat, lng]
-      let distance = 0, duration = 0;
-      if (data.features[0].properties && data.features[0].properties.summary) {
-         distance = data.features[0].properties.summary.distance || 0;
-         duration = data.features[0].properties.summary.duration || 0;
-      }
-      const routeData = { points, distance, duration };
-      cache.routes.set(cacheKey, routeData);
-      return routeData;
+    if (data.features && data.features.length > 0 && data.features[0].geometry) {
+      const allRoutes = data.features.map(feature => {
+        const coords = feature.geometry.coordinates;
+        const points = coords.map(c => [c[1], c[0]]); // Convert [lng, lat] to [lat, lng]
+        let distance = feature.properties?.summary?.distance || 0;
+        let duration = feature.properties?.summary?.duration || 0;
+        return { points, distance, duration };
+      });
+      cache.routes.set(cacheKey, allRoutes);
+      saveRoutesCache();
+      return allRoutes;
     }
     
     // If it returns standard OpenRouteService JSON (encoded polyline)
-    if (data.routes && data.routes[0] && data.routes[0].geometry) {
-      const encoded = data.routes[0].geometry;
-      let points = [];
-      let index = 0, len = encoded.length;
-      let lat = 0, lng = 0;
-      while (index < len) {
-        let b, shift = 0, result = 0;
-        do {
-          b = encoded.charCodeAt(index++) - 63;
-          result |= (b & 0x1f) << shift;
-          shift += 5;
-        } while (b >= 0x20);
-        let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lat += dlat;
-        shift = 0;
-        result = 0;
-        do {
-          b = encoded.charCodeAt(index++) - 63;
-          result |= (b & 0x1f) << shift;
-          shift += 5;
-        } while (b >= 0x20);
-        let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
-        lng += dlng;
-        points.push([lat / 1E5, lng / 1E5]);
-      }
-      let distance = 0, duration = 0;
-      if (data.routes[0].summary) {
-         distance = data.routes[0].summary.distance || 0;
-         duration = data.routes[0].summary.duration || 0;
-      } else {
-         distance = data.routes[0].distance || 0;
-         duration = data.routes[0].duration || 0;
-      }
-      const routeData = { points, distance, duration };
-      cache.routes.set(cacheKey, routeData);
-      return routeData;
+    if (data.routes && data.routes.length > 0 && data.routes[0].geometry) {
+      const allRoutes = data.routes.map(r => {
+        let points = decodePolyline(r.geometry);
+        let distance = r.summary?.distance || r.distance || 0;
+        let duration = r.summary?.duration || r.duration || 0;
+        return { points, distance, duration };
+      });
+      cache.routes.set(cacheKey, allRoutes);
+      saveRoutesCache();
+      return allRoutes;
     }
 
     return null;
@@ -297,13 +314,30 @@ export const getDrivers = async () => {
   try {
     const res = await fetchAPI('getDrivers');
     const docs = res.documents || [];
-    cache.drivers = docs.map(doc => {
+    let drivers = docs.map(doc => {
       const normalizedId = normalizeId(doc._id);
       if (doc.body && doc.body.data) {
         return { id: normalizedId, _id: normalizedId, status: 'Active', ...doc.body.data };
       }
-      return { ...doc, _id: normalizedId, id: normalizedId };
+      return { ...doc, _id: normalizedId, id: normalizedId, status: 'Active' };
     });
+
+    try {
+      const activeTrips = await getActiveTrips();
+      if (activeTrips && activeTrips.length > 0) {
+        drivers = drivers.map(d => {
+          const trip = activeTrips.find(t => t.driverId === d.id || t.driverId === d._id || t.driver === d.username || t.driver === d.name);
+          if (trip) {
+            return { ...d, status: 'Travelling' };
+          }
+          return d;
+        });
+      }
+    } catch (err) {
+      console.warn("Could not fetch active trips to correct driver status", err);
+    }
+
+    cache.drivers = drivers;
     return cache.drivers;
   } catch (e) {
     return [];
@@ -371,13 +405,32 @@ export const getVehicles = async () => {
   try {
     const res = await fetchAPI('getVehicles');
     let docs = res.documents || [];
-    cache.vehicles = docs.map(doc => {
+    
+    let vehicles = docs.map(doc => {
       const normalizedId = normalizeId(doc._id);
       if (doc.body && doc.body.data) {
         return { id: normalizedId, _id: normalizedId, status: 'Idle', ...doc.body.data };
       }
-      return { ...doc, _id: normalizedId, id: normalizedId };
+      return { ...doc, _id: normalizedId, id: normalizedId, status: doc.status || 'Idle' };
     });
+
+    // Compensate for webhook not updating vehicle status
+    try {
+      const activeTrips = await getActiveTrips();
+      if (activeTrips && activeTrips.length > 0) {
+        vehicles = vehicles.map(v => {
+          const trip = activeTrips.find(t => t.vehicleId === v.id || t.vehicleId === v._id);
+          if (trip) {
+            return { ...v, status: 'Travelling', driver: trip.driver || v.driver };
+          }
+          return v;
+        });
+      }
+    } catch (tripErr) {
+      console.warn("Could not fetch active trips to correct vehicle status", tripErr);
+    }
+
+    cache.vehicles = vehicles;
     return cache.vehicles;
   } catch (e) {
     return [];
