@@ -62,10 +62,10 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
-  const handleCancelRoute = async (tripId, vehicleId) => {
+  const handleCancelRoute = async (tripId, vehicleId, driverId) => {
     if (window.confirm("Are you sure you want to cancel this route? The vehicle will be set back to Idle.")) {
       setLoading(true);
-      await cancelRoute(tripId, vehicleId);
+      await cancelRoute(tripId, vehicleId, driverId);
       
       const [statsData, tripsData] = await Promise.all([
         getFleetStats(),
@@ -168,7 +168,7 @@ export default function Dashboard() {
                       <td>{trip.driver}</td>
                       <td>{trip.location}</td>
                       <td>
-                        <button onClick={() => handleCancelRoute(trip.id, trip.vehicleId)} className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '0.75rem' }}>Cancel</button>
+                        <button onClick={() => handleCancelRoute(trip.id, trip.vehicleId, trip.driverId)} className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '0.75rem' }}>Cancel</button>
                       </td>
                     </tr>
                   ))

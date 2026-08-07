@@ -204,7 +204,8 @@ export const assignRoute = async (vehicleId, driverId, startCoords, endCoords) =
   });
 };
 
-export const cancelRoute = async (tripId, vehicleId) => {
+export const cancelRoute = async (tripId, vehicleId, driverId) => {
+  console.log("CANCEL ROUTE CALLED WITH:", { tripId, vehicleId, driverId });
   if (cache.activeTrips) {
     cache.activeTrips = cache.activeTrips.filter(t => t.id !== tripId && t._id !== tripId);
   }
@@ -212,7 +213,7 @@ export const cancelRoute = async (tripId, vehicleId) => {
   cache.vehicles = null; // Need to refresh so vehicle becomes Idle again
   return fetchAPI('cancelRoute', {
     method: 'POST',
-    body: JSON.stringify({ tripId, vehicleId }),
+    body: JSON.stringify({ tripId, vehicleId, driverId }),
   });
 };
 
