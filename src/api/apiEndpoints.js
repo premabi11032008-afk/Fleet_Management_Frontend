@@ -362,7 +362,7 @@ export const addDriver = async (driverData) => {
 
   if (Array.isArray(driverData)) {
     const duplicates = driverData.filter(d => 
-      currentDrivers.some(cd => (cd.name && d.name && cd.name.toLowerCase() === d.name.toLowerCase()) || (cd.license && d.license && cd.license.toLowerCase() === d.license.toLowerCase()))
+      currentDrivers.some(cd => (cd.name && d.name && cd.name.toLowerCase() === d.name.toLowerCase()) || (cd.licenseNumber && d.licenseNumber && cd.licenseNumber.toLowerCase() === d.licenseNumber.toLowerCase()))
     );
     if (duplicates.length > 0) {
       throw new Error(`Duplicate record exists for drivers: ${duplicates.map(d => d.name).join(', ')}`);
@@ -386,7 +386,7 @@ export const addDriver = async (driverData) => {
     return payloads;
   }
 
-  const isDuplicate = currentDrivers.some(cd => (cd.name && driverData.name && cd.name.toLowerCase() === driverData.name.toLowerCase()) || (cd.license && driverData.license && cd.license.toLowerCase() === driverData.license.toLowerCase()));
+  const isDuplicate = currentDrivers.some(cd => (cd.name && driverData.name && cd.name.toLowerCase() === driverData.name.toLowerCase()) || (cd.licenseNumber && driverData.licenseNumber && cd.licenseNumber.toLowerCase() === driverData.licenseNumber.toLowerCase()));
   if (isDuplicate) {
     throw new Error('Duplicate record exists: A driver with this name or license number already exists.');
   }
