@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
-import { getFleetStats, getActiveTrips } from '../api/apiEndpoints';
+import { getFleetStats, getActiveTrips, cancelRoute } from '../api/apiEndpoints';
 
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -62,6 +62,21 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
+  const handleCancelRoute = async (tripId, vehicleId) => {
+    if (window.confirm("Are you sure you want to cancel this route? The vehicle will be set back to Idle.")) {
+      setLoading(true);
+      await cancelRoute(tripId, vehicleId);
+      
+      const [statsData, tripsData] = await Promise.all([
+        getFleetStats(),
+        getActiveTrips()
+      ]);
+      setStats(statsData);
+      setActiveTrips(Array.isArray(tripsData) ? tripsData : (tripsData?.items || []));
+      setLoading(false);
+    }
+  };
+
   if (loading || !stats || !mapCenter) {
     return <div className="animate-fade-in"><p>Loading dashboard data...</p></div>;
   }
@@ -107,9 +122,8 @@ export default function Dashboard() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             {activeTrips.map(trip => (
-              <div key={trip.id}>
-                {trip.currentCoords && (
-                  <Marker position={trip.currentCoords} icon={travellingIcon}>
+              <Fragment key={trip.id}>
+                {trip.currentCoords && Array.isArray(trip.currentCoords) && ( <Marker position={trip.currentCoords} icon={travellingIcon}>
                     <Popup>
                       <strong>{trip.make} {trip.model} ({trip.plate})</strong><br/>
                       Driver: {trip.driver}<br/>
@@ -117,10 +131,10 @@ export default function Dashboard() {
                     </Popup>
                   </Marker>
                 )}
-                {trip.startCoords && trip.endCoords && (
+                {trip.startCoords && Array.isArray(trip.startCoords) && trip.endCoords && Array.isArray(trip.endCoords) && (
                   <Polyline positions={[trip.startCoords, trip.endCoords]} color="var(--status-travelling)" weight={3} dashArray="5, 10" />
                 )}
-              </div>
+              </Fragment>
             ))}
           </MapContainer>
         </div>
@@ -138,11 +152,12 @@ export default function Dashboard() {
                   <th>Vehicle</th>
                   <th>Driver</th>
                   <th>Current Location</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {activeTrips.length === 0 ? (
-                  <tr><td colSpan="3" style={{ textAlign: 'center' }}>No vehicles currently travelling.</td></tr>
+                  <tr><td colSpan="4" style={{ textAlign: 'center' }}>No vehicles currently travelling.</td></tr>
                 ) : (
                   activeTrips.map(trip => (
                     <tr key={trip.id}>
@@ -152,6 +167,9 @@ export default function Dashboard() {
                       </td>
                       <td>{trip.driver}</td>
                       <td>{trip.location}</td>
+                      <td>
+                        <button onClick={() => handleCancelRoute(trip.id, trip.vehicleId)} className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '0.75rem' }}>Cancel</button>
+                      </td>
                     </tr>
                   ))
                 )}

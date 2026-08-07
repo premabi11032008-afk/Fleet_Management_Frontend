@@ -77,6 +77,7 @@ export default function DispatchRouting() {
       setSuccess(false);
       setEndCoords(null);
       setRoutePathPoints(null);
+      setRouteStats(null);
       setSelectedDriver('');
       setSelectedVehicle('');
       getVehicles().then(v => setVehicles(v.filter(vh => vh.status === 'Idle')));
@@ -84,6 +85,7 @@ export default function DispatchRouting() {
   };
 
   const [routePathPoints, setRoutePathPoints] = useState(null);
+  const [routeStats, setRouteStats] = useState(null);
 
   // Component to handle map clicks
   function MapClickHandler() {
@@ -92,13 +94,15 @@ export default function DispatchRouting() {
         const dest = [e.latlng.lat, e.latlng.lng];
         setEndCoords(dest);
         setRoutePathPoints(null);
+        setRouteStats(null);
 
         if (startCoords) {
           // Dynamically fetch the real path from the backend
           const { getRoutePath } = await import('../api/apiEndpoints');
-          const path = await getRoutePath(startCoords, dest);
-          if (path && path.length > 0) {
-            setRoutePathPoints(path);
+          const route = await getRoutePath(startCoords, dest);
+          if (route && route.points && route.points.length > 0) {
+            setRoutePathPoints(route.points);
+            setRouteStats({ distance: route.distance, duration: route.duration });
           }
         }
       },
@@ -150,7 +154,21 @@ export default function DispatchRouting() {
             {!endCoords ? (
               <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--status-offline)' }}>Please click on the map to set a destination.</p>
             ) : (
-              <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--status-idle)' }}>Destination set.</p>
+              <div>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--status-idle)' }}>Destination set.</p>
+                {routeStats && routeStats.distance > 0 && (
+                  <div style={{ display: 'flex', gap: '16px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border-color)' }}>
+                    <div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Est. Distance</span>
+                      <span style={{ fontWeight: '600' }}>{(routeStats.distance / 1000).toFixed(1)} km</span>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Est. Time</span>
+                      <span style={{ fontWeight: '600' }}>{Math.round(routeStats.duration / 60)} min</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -176,15 +194,14 @@ export default function DispatchRouting() {
               <MapClickHandler />
 
               {/* Start Marker */}
-              {selectedVehicle && (
+              {selectedVehicle && startCoords && Array.isArray(startCoords) && (
                 <Marker position={startCoords}>
                   <Popup>Vehicle Start Location (Depot)</Popup>
                 </Marker>
               )}
 
               {/* Destination Marker */}
-              {endCoords && (
-                <Marker position={endCoords} icon={destIcon}>
+              {endCoords && Array.isArray(endCoords) && ( <Marker position={endCoords} icon={destIcon}>
                   <Popup>Assigned Destination</Popup>
                 </Marker>
               )}
@@ -192,7 +209,7 @@ export default function DispatchRouting() {
               {/* Route Line */}
               {routePathPoints ? (
                 <Polyline positions={routePathPoints} color="var(--primary)" weight={5} />
-              ) : selectedVehicle && endCoords ? (
+              ) : selectedVehicle && startCoords && Array.isArray(startCoords) && endCoords && Array.isArray(endCoords) ? (
                 <Polyline positions={[startCoords, endCoords]} color="var(--primary)" weight={4} dashArray="10, 10" />
               ) : null}
             </MapContainer>

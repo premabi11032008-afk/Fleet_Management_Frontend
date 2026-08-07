@@ -73,9 +73,9 @@ export default function DriverPortal({ user }) {
               </div>
             </div>
 
-            {trip.startCoords && trip.endCoords && (
+            {trip.startCoords && Array.isArray(trip.startCoords) && trip.endCoords && Array.isArray(trip.endCoords) && (
               <div style={{ height: '400px', width: '100%', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                <MapContainer center={trip.currentCoords || trip.startCoords} zoom={11} style={{ height: '100%', width: '100%' }}>
+                <MapContainer center={trip.currentCoords && Array.isArray(trip.currentCoords) ? trip.currentCoords : trip.startCoords} zoom={11} style={{ height: '100%', width: '100%' }}>
                   <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -86,8 +86,7 @@ export default function DriverPortal({ user }) {
                   <Marker position={trip.endCoords} icon={destIcon}>
                     <Popup>Assigned Destination</Popup>
                   </Marker>
-                  {trip.currentCoords && (
-                    <Marker position={trip.currentCoords}>
+                  {trip.currentCoords && Array.isArray(trip.currentCoords) && ( <Marker position={trip.currentCoords}>
                       <Popup>Your Current Location</Popup>
                     </Marker>
                   )}

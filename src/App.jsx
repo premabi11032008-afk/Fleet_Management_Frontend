@@ -8,6 +8,7 @@ import VehicleManagement from './components/VehicleManagement';
 import AddVehicle from './components/AddVehicle';
 import DriverPortal from './components/DriverPortal';
 import Login from './components/Login';
+import Chatbot from './components/Chatbot';
 import './index.css';
 
 function App() {
@@ -74,6 +75,8 @@ function App() {
       <main className="main-content">
         {renderContent()}
       </main>
+
+      <Chatbot />
     </div>
   );
 }

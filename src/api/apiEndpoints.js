@@ -178,6 +178,18 @@ export const assignRoute = async (vehicleId, driverId, startCoords, endCoords) =
   });
 };
 
+export const cancelRoute = async (tripId, vehicleId) => {
+  if (cache.activeTrips) {
+    cache.activeTrips = cache.activeTrips.filter(t => t.id !== tripId && t._id !== tripId);
+  }
+  cache.stats = null;
+  cache.vehicles = null; // Need to refresh so vehicle becomes Idle again
+  return fetchAPI('cancelRoute', {
+    method: 'POST',
+    body: JSON.stringify({ tripId, vehicleId }),
+  });
+};
+
 export const getRoutePath = async (startCoords, endCoords) => {
   const cacheKey = JSON.stringify({ startCoords, endCoords });
   if (cache.routes.has(cacheKey)) {
@@ -224,8 +236,14 @@ export const getRoutePath = async (startCoords, endCoords) => {
     if (data.features && data.features[0] && data.features[0].geometry) {
       const coords = data.features[0].geometry.coordinates;
       const points = coords.map(c => [c[1], c[0]]); // Convert [lng, lat] to [lat, lng]
-      cache.routes.set(cacheKey, points);
-      return points;
+      let distance = 0, duration = 0;
+      if (data.features[0].properties && data.features[0].properties.summary) {
+         distance = data.features[0].properties.summary.distance || 0;
+         duration = data.features[0].properties.summary.duration || 0;
+      }
+      const routeData = { points, distance, duration };
+      cache.routes.set(cacheKey, routeData);
+      return routeData;
     }
     
     // If it returns standard OpenRouteService JSON (encoded polyline)
@@ -254,8 +272,17 @@ export const getRoutePath = async (startCoords, endCoords) => {
         lng += dlng;
         points.push([lat / 1E5, lng / 1E5]);
       }
-      cache.routes.set(cacheKey, points);
-      return points;
+      let distance = 0, duration = 0;
+      if (data.routes[0].summary) {
+         distance = data.routes[0].summary.distance || 0;
+         duration = data.routes[0].summary.duration || 0;
+      } else {
+         distance = data.routes[0].distance || 0;
+         duration = data.routes[0].duration || 0;
+      }
+      const routeData = { points, distance, duration };
+      cache.routes.set(cacheKey, routeData);
+      return routeData;
     }
 
     return null;
@@ -284,6 +311,25 @@ export const getDrivers = async () => {
 };
 
 export const addDriver = async (driverData) => {
+  if (Array.isArray(driverData)) {
+    const payloads = driverData.map(d => {
+      const baseName = (d.name || 'driver').toLowerCase().replace(/\s+/g, '');
+      const username = `${baseName}_${Math.floor(Math.random() * 900) + 100}`;
+      const password = Math.random().toString(36).slice(-8);
+      return { ...d, username, password, role: 'driver', status: 'Active' };
+    });
+    
+    if (cache.drivers) {
+      payloads.forEach(p => cache.drivers.push({ _id: Date.now().toString() + Math.random(), ...p }));
+    }
+    
+    await fetchAPI('addDriver', {
+      method: 'POST',
+      body: JSON.stringify(payloads),
+    });
+    return payloads;
+  }
+
   // Auto-generate credentials for the new driver
   const baseName = (driverData.name || 'driver').toLowerCase().replace(/\s+/g, '');
   const username = `${baseName}_${Math.floor(Math.random() * 900) + 100}`;
@@ -339,6 +385,19 @@ export const getVehicles = async () => {
 };
 
 export const addVehicle = async (vehicleData) => {
+  if (Array.isArray(vehicleData)) {
+    const payloads = vehicleData.map(v => ({ ...v, status: 'Idle' }));
+    if (cache.vehicles) {
+      payloads.forEach(p => cache.vehicles.push({ _id: Date.now().toString() + Math.random(), ...p }));
+    }
+    cache.stats = null;
+    await fetchAPI('addVehicle', {
+      method: 'POST',
+      body: JSON.stringify(payloads),
+    });
+    return payloads;
+  }
+
   const payload = {
     ...vehicleData,
     status: 'Idle' // Set default status so it appears in Dispatch Roster
@@ -357,6 +416,10 @@ export const addVehicle = async (vehicleData) => {
 export const removeVehicle = async (id) => {
   if (cache.vehicles) {
     cache.vehicles = cache.vehicles.filter(v => v._id !== id && v.id !== id);
+  }
+  if (cache.activeTrips) {
+    // Clear any active trips that were associated with this vehicle
+    cache.activeTrips = cache.activeTrips.filter(t => t.vehicleId !== id);
   }
   cache.stats = null;
   return fetchAPI('removeVehicle', {
