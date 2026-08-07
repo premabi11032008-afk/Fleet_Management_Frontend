@@ -358,7 +358,16 @@ export const getDrivers = async () => {
 };
 
 export const addDriver = async (driverData) => {
+  const currentDrivers = await getDrivers();
+
   if (Array.isArray(driverData)) {
+    const duplicates = driverData.filter(d => 
+      currentDrivers.some(cd => (cd.name && d.name && cd.name.toLowerCase() === d.name.toLowerCase()) || (cd.license && d.license && cd.license.toLowerCase() === d.license.toLowerCase()))
+    );
+    if (duplicates.length > 0) {
+      throw new Error(`Duplicate record exists for drivers: ${duplicates.map(d => d.name).join(', ')}`);
+    }
+
     const payloads = driverData.map(d => {
       const baseName = (d.name || 'driver').toLowerCase().replace(/\s+/g, '');
       const username = `${baseName}_${Math.floor(Math.random() * 900) + 100}`;
@@ -375,6 +384,11 @@ export const addDriver = async (driverData) => {
       body: JSON.stringify(payloads),
     });
     return payloads;
+  }
+
+  const isDuplicate = currentDrivers.some(cd => (cd.name && driverData.name && cd.name.toLowerCase() === driverData.name.toLowerCase()) || (cd.license && driverData.license && cd.license.toLowerCase() === driverData.license.toLowerCase()));
+  if (isDuplicate) {
+    throw new Error('Duplicate record exists: A driver with this name or license number already exists.');
   }
 
   // Auto-generate credentials for the new driver
@@ -451,7 +465,16 @@ export const getVehicles = async () => {
 };
 
 export const addVehicle = async (vehicleData) => {
+  const currentVehicles = await getVehicles();
+
   if (Array.isArray(vehicleData)) {
+    const duplicates = vehicleData.filter(v => 
+      currentVehicles.some(cv => cv.plate && v.plate && cv.plate.toLowerCase() === v.plate.toLowerCase())
+    );
+    if (duplicates.length > 0) {
+      throw new Error(`Duplicate record exists for vehicles with plate: ${duplicates.map(v => v.plate).join(', ')}`);
+    }
+
     const payloads = vehicleData.map(v => ({ ...v, status: 'Idle' }));
     if (cache.vehicles) {
       payloads.forEach(p => cache.vehicles.push({ _id: Date.now().toString() + Math.random(), ...p }));
@@ -462,6 +485,11 @@ export const addVehicle = async (vehicleData) => {
       body: JSON.stringify(payloads),
     });
     return payloads;
+  }
+
+  const isDuplicate = currentVehicles.some(cv => cv.plate && vehicleData.plate && cv.plate.toLowerCase() === vehicleData.plate.toLowerCase());
+  if (isDuplicate) {
+    throw new Error('Duplicate record exists: A vehicle with this plate already exists.');
   }
 
   const payload = {
