@@ -54,12 +54,24 @@ const fetchAPI = async (actionName, options = {}) => {
       payloadData = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
     }
 
+    // Get the JWT token from sessionStorage (if the user is logged in) 
+    // or from a fallback environment variable.
+    const savedUser = sessionStorage.getItem('ifms_user');
+    const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+    const token = parsedUser?.token || import.meta.env.VITE_API_TOKEN;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(API_BASE_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
       body: JSON.stringify({
         action: actionName,
         originalMethod: options.method || 'GET',
