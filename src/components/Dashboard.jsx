@@ -1,6 +1,6 @@
 import { useState, useEffect, Fragment } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
-import { getFleetStats, getActiveTrips, cancelRoute } from '../api/apiEndpoints';
+import { getFleetStats, getActiveTrips, cancelRoute, getRoutePath } from '../api/apiEndpoints';
 
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -24,6 +24,7 @@ const travellingIcon = L.icon({
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [activeTrips, setActiveTrips] = useState([]);
+  const [routePolylines, setRoutePolylines] = useState({});
   const [loading, setLoading] = useState(true);
   const [mapCenter, setMapCenter] = useState(null);
 
@@ -50,12 +51,27 @@ export default function Dashboard() {
       ]);
       setStats(statsData);
       
+      let trips = [];
       if (Array.isArray(tripsData)) {
-        setActiveTrips(tripsData);
+        trips = tripsData;
       } else {
         console.warn("Expected tripsData to be an array but got:", tripsData);
-        setActiveTrips(tripsData && tripsData.items ? tripsData.items : []);
+        trips = tripsData && tripsData.items ? tripsData.items : [];
       }
+      setActiveTrips(trips);
+
+      // Fetch route polylines from cache/API for active trips
+      const polylines = {};
+      for (const trip of trips) {
+        if (trip.startCoords && trip.endCoords) {
+          const routes = await getRoutePath(trip.startCoords, trip.endCoords);
+          if (routes && routes.length > 0) {
+            const shortest = routes.sort((a, b) => a.distance - b.distance)[0];
+            polylines[trip.id || trip._id] = shortest.points;
+          }
+        }
+      }
+      setRoutePolylines(polylines);
       
       setLoading(false);
     }
@@ -123,7 +139,8 @@ export default function Dashboard() {
             />
             {activeTrips.map(trip => (
               <Fragment key={trip.id}>
-                {trip.currentCoords && Array.isArray(trip.currentCoords) && ( <Marker position={trip.currentCoords} icon={travellingIcon}>
+                {trip.currentCoords && Array.isArray(trip.currentCoords) && ( 
+                  <Marker position={trip.currentCoords} icon={travellingIcon}>
                     <Popup>
                       <strong>{trip.make} {trip.model} ({trip.plate})</strong><br/>
                       Driver: {trip.driver}<br/>
@@ -131,8 +148,23 @@ export default function Dashboard() {
                     </Popup>
                   </Marker>
                 )}
+                {trip.startCoords && Array.isArray(trip.startCoords) && (
+                  <Marker position={trip.startCoords}>
+                    <Popup>Start: {trip.location}</Popup>
+                  </Marker>
+                )}
+                {trip.endCoords && Array.isArray(trip.endCoords) && (
+                  <Marker position={trip.endCoords}>
+                    <Popup>Destination</Popup>
+                  </Marker>
+                )}
+                
                 {trip.startCoords && Array.isArray(trip.startCoords) && trip.endCoords && Array.isArray(trip.endCoords) && (
-                  <Polyline positions={[trip.startCoords, trip.endCoords]} color="var(--status-travelling)" weight={3} dashArray="5, 10" />
+                  routePolylines[trip.id || trip._id] ? (
+                    <Polyline positions={routePolylines[trip.id || trip._id]} color="var(--status-travelling)" weight={4} />
+                  ) : (
+                    <Polyline positions={[trip.startCoords, trip.endCoords]} color="var(--status-travelling)" weight={3} dashArray="5, 10" />
+                  )
                 )}
               </Fragment>
             ))}

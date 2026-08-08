@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
-import { getActiveTrips } from '../api/apiEndpoints';
+import { getActiveTrips, getRoutePath } from '../api/apiEndpoints';
 
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -22,15 +22,35 @@ const destIcon = L.icon({
 export default function DriverPortal({ user }) {
   const [trip, setTrip] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [routePoints, setRoutePoints] = useState(null);
 
   useEffect(() => {
     async function fetchTrip() {
-      // Find trip assigned to this driver's name
-      // Note: user.username contains the full name we resolved in authenticateUser
+      // Find trip assigned to this driver's name or ID
       const trips = await getActiveTrips();
-      const myTrip = trips.find(t => t.driver === user.username);
+      console.log("DRIVER PORTAL DEBUG - LOGGED IN USER:", user);
+      console.log("DRIVER PORTAL DEBUG - ACTIVE TRIPS:", trips);
+      
+      const myTrip = trips.find(t => 
+        t.driverId === user.id || 
+        t.driver === user.username ||
+        t.driver === user.systemUsername || // Match exact system username
+        t.driverId === user.username || 
+        t.driver === user.id
+      );
+      
+      console.log("DRIVER PORTAL DEBUG - FOUND TRIP:", myTrip);
       setTrip(myTrip);
       setLoading(false);
+
+      if (myTrip && myTrip.startCoords && myTrip.endCoords) {
+        const routes = await getRoutePath(myTrip.startCoords, myTrip.endCoords);
+        if (routes && routes.length > 0) {
+          // Sort by distance to ensure shortest is picked, or just take first
+          const shortest = routes.sort((a, b) => a.distance - b.distance)[0];
+          setRoutePoints(shortest.points);
+        }
+      }
     }
     fetchTrip();
   }, [user]);
@@ -90,7 +110,11 @@ export default function DriverPortal({ user }) {
                       <Popup>Your Current Location</Popup>
                     </Marker>
                   )}
-                  <Polyline positions={[trip.startCoords, trip.endCoords]} color="var(--primary)" weight={4} dashArray="5, 10" />
+                  {routePoints ? (
+                    <Polyline positions={routePoints} color="var(--primary)" weight={5} />
+                  ) : (
+                    <Polyline positions={[trip.startCoords, trip.endCoords]} color="var(--primary)" weight={4} dashArray="5, 10" />
+                  )}
                 </MapContainer>
               </div>
             )}

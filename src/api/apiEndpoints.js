@@ -26,6 +26,10 @@ const normalizeId = (idObj) => {
   if (!idObj) return idObj;
   if (typeof idObj === 'string') return idObj;
 
+  // Sometimes n8n returns ObjectId as { $oid: "..." }
+  if (idObj.$oid) return idObj.$oid;
+  if (idObj.oid) return idObj.oid;
+
   // Sometimes it's { type: 'Buffer', data: [...] }
   if (idObj.type === 'Buffer' && Array.isArray(idObj.data) && idObj.data.length === 12) {
     return idObj.data.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -42,6 +46,15 @@ const normalizeId = (idObj) => {
   // Sometimes it's { id: { type: 'Buffer', data: [...] } }
   if (idObj.id && idObj.id.type === 'Buffer' && Array.isArray(idObj.id.data) && idObj.id.data.length === 12) {
     return idObj.id.data.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // If it's still an object and we can't parse it, we must safely stringify it to avoid [object Object]
+  if (typeof idObj === 'object') {
+     console.warn("Unrecognized ID format:", idObj);
+     // Try to see if it's an object with a single string property that might be the ID
+     const values = Object.values(idObj);
+     if (values.length > 0 && typeof values[0] === 'string') return values[0];
+     return JSON.stringify(idObj);
   }
 
   return idObj;
@@ -133,7 +146,12 @@ export const authenticateUser = async (role, username, password) => {
     const userDoc = docs.find(u => u.username === username && u.password === password);
 
     if (userDoc) {
-      return { role: "driver", username: userDoc.name || username, id: userDoc._id || userDoc.id };
+      return { 
+        role: "driver", 
+        username: userDoc.name || username, 
+        systemUsername: userDoc.username || username,
+        id: userDoc._id || userDoc.id 
+      };
     }
     throw new Error("Invalid driver credentials");
   }
@@ -176,16 +194,26 @@ export const getActiveTrips = async () => {
 };
 
 export const assignRoute = async (vehicleId, driverId, startCoords, endCoords) => {
+  // Resolve vehicle and driver details from cache first, before clearing it
+  let vehicle = cache.vehicles ? cache.vehicles.find(v => v.id === vehicleId || v._id === vehicleId) : null;
+  let driver = cache.drivers ? cache.drivers.find(d => d.id === driverId || d._id === driverId) : null;
+
+  // Fallback to fetching if not found in cache
+  if (!vehicle) {
+    const vehicles = await getVehicles();
+    vehicle = vehicles.find(v => v.id === vehicleId || v._id === vehicleId);
+  }
+  if (!driver) {
+    const drivers = await getDrivers();
+    driver = drivers.find(d => d.id === driverId || d._id === driverId);
+  }
+
+  // Now clear the cache so the system registers the state changes (like vehicle status)
   cache.activeTrips = null;
   cache.vehicles = null;
+  cache.drivers = null;
   cache.stats = null;
   
-  // Resolve vehicle and driver details
-  const vehicles = await getVehicles();
-  const drivers = await getDrivers();
-  const vehicle = vehicles.find(v => v.id === vehicleId || v._id === vehicleId);
-  const driver = drivers.find(d => d.id === driverId || d._id === driverId);
-
   return fetchAPI('assignRoute', {
     method: 'POST',
     body: JSON.stringify({
@@ -206,6 +234,25 @@ export const assignRoute = async (vehicleId, driverId, startCoords, endCoords) =
 
 export const cancelRoute = async (tripId, vehicleId, driverId) => {
   console.log("CANCEL ROUTE CALLED WITH:", { tripId, vehicleId, driverId });
+
+  // If vehicleId is a display string like "Make Model (PLATE)", find the true ID
+  if (vehicleId && !vehicleId.match(/^[0-9a-fA-F]{24}$/)) {
+    const vehicles = await getVehicles();
+    const matchedVehicle = vehicles.find(v => vehicleId.includes(v.plate) || vehicleId === v.plate);
+    if (matchedVehicle) {
+      vehicleId = matchedVehicle.id || matchedVehicle._id;
+    }
+  }
+
+  // If driverId is a display string (like the driver's name), find the true ID
+  if (driverId && !driverId.match(/^[0-9a-fA-F]{24}$/)) {
+    const drivers = await getDrivers();
+    const matchedDriver = drivers.find(d => driverId.includes(d.name) || driverId === d.name);
+    if (matchedDriver) {
+      driverId = matchedDriver.id || matchedDriver._id;
+    }
+  }
+
   if (cache.activeTrips) {
     cache.activeTrips = cache.activeTrips.filter(t => t.id !== tripId && t._id !== tripId);
   }
@@ -327,12 +374,19 @@ export const getDrivers = async () => {
   try {
     const res = await fetchAPI('getDrivers');
     const docs = res.documents || [];
-    let drivers = docs.map(doc => {
+    let drivers = docs.flatMap(doc => {
       const normalizedId = normalizeId(doc._id);
-      if (doc.body && doc.body.data) {
-        return { id: normalizedId, _id: normalizedId, status: 'Active', ...doc.body.data };
+      if (doc.body && Array.isArray(doc.body.data)) {
+        return doc.body.data.map((item, index) => ({
+          id: `${normalizedId}_${index}`,
+          _id: `${normalizedId}_${index}`,
+          status: 'Active',
+          ...item
+        }));
+      } else if (doc.body && doc.body.data) {
+        return [{ id: normalizedId, _id: normalizedId, status: 'Active', ...doc.body.data }];
       }
-      return { ...doc, _id: normalizedId, id: normalizedId, status: 'Active' };
+      return [{ ...doc, _id: normalizedId, id: normalizedId, status: 'Active' }];
     });
 
     try {
@@ -376,13 +430,17 @@ export const addDriver = async (driverData) => {
     });
     
     if (cache.drivers) {
-      payloads.forEach(p => cache.drivers.push({ _id: Date.now().toString() + Math.random(), ...p }));
+      payloads.forEach((p, index) => cache.drivers.push({ _id: Date.now().toString() + index, ...p }));
     }
     
-    await fetchAPI('addDriver', {
-      method: 'POST',
-      body: JSON.stringify(payloads),
-    });
+    // Send individual requests so that they are inserted as separate documents
+    await Promise.all(payloads.map(payload => 
+      fetchAPI('addDriver', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+    ));
+    
     return payloads;
   }
 
@@ -433,12 +491,19 @@ export const getVehicles = async () => {
     const res = await fetchAPI('getVehicles');
     let docs = res.documents || [];
     
-    let vehicles = docs.map(doc => {
+    let vehicles = docs.flatMap(doc => {
       const normalizedId = normalizeId(doc._id);
-      if (doc.body && doc.body.data) {
-        return { id: normalizedId, _id: normalizedId, status: 'Idle', ...doc.body.data };
+      if (doc.body && Array.isArray(doc.body.data)) {
+        return doc.body.data.map((item, index) => ({
+          id: `${normalizedId}_${index}`,
+          _id: `${normalizedId}_${index}`,
+          status: 'Idle',
+          ...item
+        }));
+      } else if (doc.body && doc.body.data) {
+        return [{ id: normalizedId, _id: normalizedId, status: 'Idle', ...doc.body.data }];
       }
-      return { ...doc, _id: normalizedId, id: normalizedId, status: doc.status || 'Idle' };
+      return [{ ...doc, _id: normalizedId, id: normalizedId, status: doc.status || 'Idle' }];
     });
 
     // Compensate for webhook not updating vehicle status
@@ -477,13 +542,18 @@ export const addVehicle = async (vehicleData) => {
 
     const payloads = vehicleData.map(v => ({ ...v, status: 'Idle' }));
     if (cache.vehicles) {
-      payloads.forEach(p => cache.vehicles.push({ _id: Date.now().toString() + Math.random(), ...p }));
+      payloads.forEach((p, index) => cache.vehicles.push({ _id: Date.now().toString() + index, ...p }));
     }
     cache.stats = null;
-    await fetchAPI('addVehicle', {
-      method: 'POST',
-      body: JSON.stringify(payloads),
-    });
+    
+    // Send individual requests to insert them as separate documents
+    await Promise.all(payloads.map(payload => 
+      fetchAPI('addVehicle', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+    ));
+    
     return payloads;
   }
 
